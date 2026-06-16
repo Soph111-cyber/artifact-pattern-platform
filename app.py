@@ -1,409 +1,329 @@
 
 import streamlit as st
-from PIL import Image, ImageOps, ImageFilter
+from PIL import Image
 import numpy as np
 import pandas as pd
 import cv2
-import io
 import json
 from pathlib import Path
-
-# =========================================================
-# Artifact Pattern Intelligence Platform
-# 文物纹样智能分析与破碎文物修复平台
-# ---------------------------------------------------------
-# This Streamlit app is designed as a research-demo platform.
-# Later, you can replace the heuristic modules with real models:
-# - 3D reconstruction: COLMAP / NeRF / Gaussian Splatting / Meshroom
-# - Multimodal analysis: CLIP / BLIP / SAM / custom CNN / Vision Transformer
-# - Culture-era classifier: fine-tuned image classifier + metadata database
-# =========================================================
+import re
 
 st.set_page_config(
-    page_title="Artifact Pattern Intelligence",
+    page_title="Artifact Intelligence Lab",
     page_icon="🏺",
     layout="wide",
 )
 
-# -----------------------------
-# Bilingual UI dictionary
-# -----------------------------
+DB_PATH = Path("data/global_artifact_pattern_feature_database.xlsx")
+
 TEXT = {
     "中文": {
-        "title": "🏺 文物纹样智能分析与破碎文物修复平台",
-        "subtitle": "利用 3D 重建、多模态分析与纹样识别，辅助判断文物的完整形态、纹样特征、时代地域与文化来源。",
+        "title": "🏺 Artifact Intelligence Lab｜全球文物纹样识别与修复平台",
+        "subtitle": "上传纹样或文物碎片图片，平台将结合图像特征与全球纹样数据库，输出可能的文化来源、时代地域、纹样元素与修复/3D重建思路。",
         "upload": "上传纹样 / 文物碎片图片",
-        "upload_help": "支持 JPG、PNG、JPEG。若有多张碎片图，可逐张上传并记录分析结果。",
-        "sidebar_title": "⚙️ 平台设置",
-        "language": "界面语言",
-        "confidence_mode": "置信度模式",
-        "confidence_mode_help": "Demo 使用启发式规则生成结果；未来可替换为真实模型输出。",
-        "analysis": "开始分析",
-        "input_preview": "原始图片",
-        "processed_preview": "增强后的图片",
-        "module1": "① 破碎文物修复完整 / 3D重建思路",
-        "module2": "② 纹样特征与元素识别 / 多模态分析",
-        "module3": "③ 时代、地域与文化来源判断",
-        "summary": "综合判断报告",
-        "download": "下载分析报告 JSON",
-        "no_file": "请先上传一张文物纹样或碎片图片。",
-        "research_note": "研究提示",
-        "warning": "这是演示平台，不应替代专业考古鉴定。真正判断需要结合出土层位、材质、器型、工艺、铭文和可靠数据库。",
-        "github": "GitHub 部署说明",
+        "run": "开始分析",
+        "db_status": "全球纹样数据库状态",
+        "no_db": "未找到 Excel 数据库。请把 global_artifact_pattern_feature_database.xlsx 放入 data/ 文件夹。",
+        "original": "原始图片",
+        "enhanced": "增强图 + 边缘提示",
+        "visual_features": "图像特征提取",
+        "pattern_elements": "识别出的纹样元素",
+        "global_candidates": "全球文化来源候选",
+        "reconstruction": "破碎文物修复与3D重建建议",
+        "report": "综合报告",
+        "download": "下载 JSON 报告",
+        "warning": "注意：这是研究型原型平台，不是专业鉴定结论。真正判断需要结合材质、器型、尺寸、出土语境、铭文、博物馆/考古报告来源等证据。",
+        "metadata": "可选补充信息",
+        "material": "材质",
+        "object_type": "器型/物件类型",
+        "region_hint": "已知或猜测地区",
+        "era_hint": "已知或猜测时代",
+        "caption": "图片描述/备注",
+        "top_k": "候选数量",
     },
     "English": {
-        "title": "🏺 Artifact Pattern Intelligence & Reconstruction Platform",
-        "subtitle": "A research-demo platform using 3D reconstruction, multimodal pattern analysis, and cultural attribution to assist artifact interpretation.",
+        "title": "🏺 Artifact Intelligence Lab｜Global Artifact Pattern Recognition & Reconstruction",
+        "subtitle": "Upload an artifact pattern or fragment image. The platform combines visual features with a global motif database to infer possible cultural sources, era-region context, pattern elements, and reconstruction ideas.",
         "upload": "Upload pattern / artifact fragment image",
-        "upload_help": "Supports JPG, PNG, JPEG. If you have multiple fragments, upload them one by one and save each report.",
-        "sidebar_title": "⚙️ Platform Settings",
-        "language": "Interface Language",
-        "confidence_mode": "Confidence Mode",
-        "confidence_mode_help": "This demo uses heuristic scoring. You can later replace it with real model predictions.",
-        "analysis": "Run Analysis",
-        "input_preview": "Original Image",
-        "processed_preview": "Enhanced Image",
-        "module1": "① Fragment Completion / 3D Reconstruction Plan",
-        "module2": "② Pattern Feature & Element Recognition / Multimodal Analysis",
-        "module3": "③ Era, Region & Cultural Attribution",
-        "summary": "Integrated Interpretation Report",
-        "download": "Download JSON Report",
-        "no_file": "Please upload an artifact pattern or fragment image first.",
-        "research_note": "Research Note",
-        "warning": "This is a demo platform and should not replace professional archaeological authentication. Real attribution requires stratigraphy, material, form, craft, inscriptions, and verified databases.",
-        "github": "GitHub Deployment Guide",
+        "run": "Run analysis",
+        "db_status": "Global motif database status",
+        "no_db": "Excel database not found. Please place global_artifact_pattern_feature_database.xlsx in the data/ folder.",
+        "original": "Original image",
+        "enhanced": "Enhanced image + edge overlay",
+        "visual_features": "Extracted visual features",
+        "pattern_elements": "Recognized pattern elements",
+        "global_candidates": "Global cultural attribution candidates",
+        "reconstruction": "Fragment restoration & 3D reconstruction suggestions",
+        "report": "Integrated report",
+        "download": "Download JSON report",
+        "warning": "Note: this is a research prototype, not a professional authentication result. Real attribution requires material, object type, measurements, provenance, inscription, excavation context, and museum/archaeological sources.",
+        "metadata": "Optional metadata",
+        "material": "Material",
+        "object_type": "Object type",
+        "region_hint": "Known or guessed region",
+        "era_hint": "Known or guessed era",
+        "caption": "Image description / notes",
+        "top_k": "Number of candidates",
     }
 }
 
-# -----------------------------
-# Utility functions
-# -----------------------------
-def pil_to_cv2(img: Image.Image):
+def safe_text(x):
+    if pd.isna(x):
+        return ""
+    return str(x)
+
+@st.cache_data
+def load_database():
+    if not DB_PATH.exists():
+        return None
+    xl = pd.ExcelFile(DB_PATH)
+    main = pd.read_excel(DB_PATH, sheet_name="Pattern_Feature_DB")
+    return main
+
+def pil_to_cv2(img):
     arr = np.array(img.convert("RGB"))
     return cv2.cvtColor(arr, cv2.COLOR_RGB2BGR)
 
 def cv2_to_pil(arr):
-    arr = cv2.cvtColor(arr, cv2.COLOR_BGR2RGB)
-    return Image.fromarray(arr)
+    return Image.fromarray(cv2.cvtColor(arr, cv2.COLOR_BGR2RGB))
 
-def resize_keep_ratio(img: Image.Image, max_side=900):
+def resize_keep_ratio(img, max_side=900):
     w, h = img.size
     scale = min(max_side / max(w, h), 1)
     return img.resize((int(w * scale), int(h * scale)))
 
-def enhance_image(img: Image.Image):
-    """Basic preprocessing: grayscale, denoise, edge enhancement."""
+def preprocess(img):
     img = resize_keep_ratio(img)
-    cv_img = pil_to_cv2(img)
-    denoise = cv2.fastNlMeansDenoisingColored(cv_img, None, 10, 10, 7, 21)
+    bgr = pil_to_cv2(img)
+    denoise = cv2.fastNlMeansDenoisingColored(bgr, None, 10, 10, 7, 21)
     gray = cv2.cvtColor(denoise, cv2.COLOR_BGR2GRAY)
     edges = cv2.Canny(gray, 80, 180)
-    edges_bgr = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
-    overlay = cv2.addWeighted(denoise, 0.75, edges_bgr, 0.25, 0)
-    return cv2_to_pil(overlay), edges, gray
+    edge_bgr = cv2.cvtColor(edges, cv2.COLOR_GRAY2BGR)
+    overlay = cv2.addWeighted(denoise, 0.78, edge_bgr, 0.22, 0)
+    return cv2_to_pil(overlay), gray, edges
 
-def extract_color_features(img: Image.Image):
-    arr = np.array(img.convert("RGB"))
-    pixels = arr.reshape(-1, 3)
-    mean_rgb = pixels.mean(axis=0)
-    std_rgb = pixels.std(axis=0)
-
-    # Dominant colors by k-means
-    pixels_small = pixels[np.random.choice(len(pixels), min(8000, len(pixels)), replace=False)]
-    pixels_small = np.float32(pixels_small)
-    K = 5
-    criteria = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 25, 1.0)
-    _, labels, centers = cv2.kmeans(pixels_small, K, None, criteria, 5, cv2.KMEANS_RANDOM_CENTERS)
-    centers = np.uint8(centers)
-    counts = np.bincount(labels.flatten(), minlength=K)
-    order = np.argsort(-counts)
-    dominant = centers[order].tolist()
-    proportions = (counts[order] / counts.sum()).round(3).tolist()
-
-    return {
-        "mean_rgb": mean_rgb.round(2).tolist(),
-        "rgb_std": std_rgb.round(2).tolist(),
-        "dominant_colors_rgb": dominant,
-        "dominant_color_proportions": proportions
-    }
-
-def extract_shape_texture_features(img: Image.Image, edges, gray):
+def extract_features(img, gray, edges):
     h, w = gray.shape
-    edge_density = float(np.sum(edges > 0) / edges.size)
-
-    # Symmetry score: compare image with horizontal and vertical flipped versions
-    gray_resized = cv2.resize(gray, (256, 256))
-    v_flip = cv2.flip(gray_resized, 1)
-    h_flip = cv2.flip(gray_resized, 0)
-    vertical_sym = 1 - np.mean(np.abs(gray_resized.astype(float) - v_flip.astype(float))) / 255
-    horizontal_sym = 1 - np.mean(np.abs(gray_resized.astype(float) - h_flip.astype(float))) / 255
-
-    # Texture roughness via Laplacian variance
+    edge_density = float((edges > 0).sum() / edges.size)
+    small = cv2.resize(gray, (256, 256))
+    v_sym = 1 - np.mean(np.abs(small.astype(float) - cv2.flip(small, 1).astype(float))) / 255
+    h_sym = 1 - np.mean(np.abs(small.astype(float) - cv2.flip(small, 0).astype(float))) / 255
     lap_var = float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
-    # Contour complexity
     contours, _ = cv2.findContours(edges, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     contour_count = len(contours)
-    contour_area = sum(cv2.contourArea(c) for c in contours)
-    contour_area_ratio = float(contour_area / (w * h))
+    contour_area_ratio = sum(cv2.contourArea(c) for c in contours) / (w * h)
+
+    rgb = np.array(img.convert("RGB"))
+    mean_rgb = rgb.reshape(-1, 3).mean(axis=0)
+    red_warmth = float(mean_rgb[0] - mean_rgb[2])
+    brightness = float(mean_rgb.mean())
 
     return {
         "edge_density": round(edge_density, 4),
-        "vertical_symmetry_score": round(float(vertical_sym), 3),
-        "horizontal_symmetry_score": round(float(horizontal_sym), 3),
-        "texture_laplacian_variance": round(lap_var, 2),
+        "vertical_symmetry": round(float(v_sym), 3),
+        "horizontal_symmetry": round(float(h_sym), 3),
+        "texture_roughness": round(lap_var, 2),
         "contour_count": int(contour_count),
-        "contour_area_ratio": round(contour_area_ratio, 4)
+        "contour_area_ratio": round(float(contour_area_ratio), 4),
+        "mean_rgb": [round(float(x), 2) for x in mean_rgb],
+        "red_warmth": round(red_warmth, 2),
+        "brightness": round(brightness, 2),
     }
 
-def infer_pattern_elements(features):
-    """Heuristic element recognition. Replace with real model later."""
-    edge = features["edge_density"]
-    v_sym = features["vertical_symmetry_score"]
-    h_sym = features["horizontal_symmetry_score"]
-    rough = features["texture_laplacian_variance"]
-    contours = features["contour_count"]
+def infer_visual_tags(features):
+    tags = []
+    if max(features["vertical_symmetry"], features["horizontal_symmetry"]) > 0.72:
+        tags += ["symmetry", "symmetrical", "axis", "mirror", "对称"]
+    if features["edge_density"] > 0.09:
+        tags += ["dense", "linear", "incised", "geometric", "密集", "线刻", "几何"]
+    if features["contour_count"] > 120:
+        tags += ["repeated", "tessellation", "interlace", "repetition", "重复", "连续"]
+    if features["texture_roughness"] > 500:
+        tags += ["relief", "rough", "carved", "embossed", "浮雕", "雕刻"]
+    if features["red_warmth"] > 18:
+        tags += ["red", "terracotta", "pottery", "warm", "红", "陶"]
+    if features["brightness"] < 95:
+        tags += ["dark", "bronze", "black", "深色", "青铜"]
+    return list(dict.fromkeys(tags))
 
+def recognize_elements(features):
     elements = []
-
-    if v_sym > 0.72 or h_sym > 0.72:
-        elements.append(("对称构图 / symmetrical composition", 0.78))
-    if edge > 0.09:
-        elements.append(("密集线刻 / dense incised lines", 0.72))
-    if contours > 120:
-        elements.append(("重复几何单元 / repeated geometric units", 0.68))
-    if rough > 450:
-        elements.append(("高纹理起伏 / rough or relief-like texture", 0.65))
-    if edge < 0.045 and rough < 250:
-        elements.append(("大面积色块 / broad color fields", 0.61))
-
+    if max(features["vertical_symmetry"], features["horizontal_symmetry"]) > 0.72:
+        elements.append({"element": "symmetrical composition / 对称构图", "confidence": 0.78})
+    if features["edge_density"] > 0.09:
+        elements.append({"element": "dense linear or incised motif / 密集线性或线刻纹样", "confidence": 0.72})
+    if features["contour_count"] > 120:
+        elements.append({"element": "repeated geometric unit / 重复几何单元", "confidence": 0.68})
+    if features["texture_roughness"] > 500:
+        elements.append({"element": "relief-like or carved surface / 浮雕感或雕刻表面", "confidence": 0.64})
     if not elements:
-        elements.append(("低复杂度纹样 / low-complexity motif", 0.55))
-
+        elements.append({"element": "low-to-medium complexity motif / 中低复杂度纹样", "confidence": 0.50})
     return elements
 
-def infer_reconstruction_plan(features):
-    """Generate a technical plan for fragment restoration and 3D reconstruction."""
-    edge = features["edge_density"]
-    contours = features["contour_count"]
-    sym = max(features["vertical_symmetry_score"], features["horizontal_symmetry_score"])
+def tokenize(s):
+    s = safe_text(s).lower()
+    return set(re.findall(r"[a-zA-Z][a-zA-Z\-]+|[\u4e00-\u9fff]+", s))
 
-    if edge > 0.08:
-        fragment_match = "可优先利用边缘曲率、断裂线轮廓和纹样连续性进行碎片拼合。"
-        tech = "建议使用边缘检测 + 特征点匹配 + ICP 配准；若有多角度照片，可进入 SfM/MVS 三维重建流程。"
+def row_score(row, visual_tags, metadata_text):
+    search_cols = [
+        "Key_motifs_EN", "关键纹样_CN", "Geometry_tags", "Color_palette_hints",
+        "Material_surface_hints", "Model_positive_keywords", "Model_visual_features",
+        "Potential_confusions", "Suggested_model_label", "Culture_or_style", "Era_period",
+        "Macro_region", "Region_or_origin"
+    ]
+    row_text = " ".join(safe_text(row.get(c, "")) for c in search_cols)
+    row_tokens = tokenize(row_text)
+    meta_tokens = tokenize(metadata_text)
+    tag_tokens = set(t.lower() for t in visual_tags)
+
+    tag_hits = len(row_tokens & tag_tokens)
+    meta_hits = len(row_tokens & meta_tokens)
+
+    base = 0.35
+    score = base + 0.08 * tag_hits + 0.05 * meta_hits
+
+    # Use seed confidence if the database has it
+    try:
+        seed = float(row.get("Attribution_confidence_seed", 0))
+        if 0 <= seed <= 1:
+            score = 0.65 * score + 0.35 * seed
+    except Exception:
+        pass
+
+    return min(round(score, 3), 0.95), tag_hits, meta_hits
+
+def global_match(db, features, visual_tags, metadata, top_k=5):
+    metadata_text = " ".join(metadata.values())
+    rows = []
+    for _, row in db.iterrows():
+        score, tag_hits, meta_hits = row_score(row, visual_tags, metadata_text)
+        rows.append({
+            "Score": score,
+            "Culture_or_style": safe_text(row.get("Culture_or_style", "")),
+            "Era_period": safe_text(row.get("Era_period", "")),
+            "Macro_region": safe_text(row.get("Macro_region", "")),
+            "Region_or_origin": safe_text(row.get("Region_or_origin", "")),
+            "Key_motifs_EN": safe_text(row.get("Key_motifs_EN", "")),
+            "关键纹样_CN": safe_text(row.get("关键纹样_CN", "")),
+            "Model_visual_features": safe_text(row.get("Model_visual_features", "")),
+            "Potential_confusions": safe_text(row.get("Potential_confusions", "")),
+            "Source_URL": safe_text(row.get("Source_URL", "")),
+            "Tag_hits": tag_hits,
+            "Metadata_hits": meta_hits
+        })
+    out = pd.DataFrame(rows).sort_values("Score", ascending=False).head(top_k)
+    return out.reset_index(drop=True)
+
+def reconstruction_advice(features):
+    advice = []
+    if features["edge_density"] > 0.08:
+        advice.append("边缘信息较丰富：可优先做断裂边界提取、边缘曲率匹配、纹样连续性拼合。")
+        advice.append("Technical path: Canny/SAM segmentation → SIFT/ORB/LoFTR feature matching → ICP alignment if 3D data exists.")
     else:
-        fragment_match = "边缘信息较弱，单图拼合不稳定，应补充侧面、背面和不同光照照片。"
-        tech = "建议先做图像增强、材质分割，再结合人工标注断裂边界。"
-
-    if sym > 0.72:
-        completion = "纹样可能具有较强对称性，可用镜像补全作为初步复原假设。"
+        advice.append("边缘信息偏弱：建议补充侧面、背面、斜光照片，避免只凭单图判断碎片拼合。")
+    if max(features["vertical_symmetry"], features["horizontal_symmetry"]) > 0.72:
+        advice.append("纹样有较强对称性：可尝试镜像补全，但必须标记为假设区域。")
     else:
-        completion = "对称性不强，补全时应避免直接镜像，需要依赖相似器物数据库。"
+        advice.append("对称性不强：更适合用相似器物数据库做 reference-based completion。")
+    advice.append("若要真正 3D 重建：拍摄 30–80 张多角度照片，使用 COLMAP/Meshroom 生成点云和 mesh，再做纹理贴图。")
+    return advice
 
-    return {
-        "fragment_matching": fragment_match,
-        "completion_hypothesis": completion,
-        "recommended_pipeline": [
-            "1. 图片预处理：去噪、矫正、增强边缘",
-            "2. 断裂边界提取：Canny/SAM/人工标注",
-            "3. 特征匹配：SIFT/ORB/深度特征匹配",
-            "4. 三维重建：多角度图像 → SfM → 稠密点云 → mesh",
-            "5. 完整性推测：利用对称性、纹样连续性和数据库相似器物",
-            "6. 输出：复原草图、置信度、可疑区域标注"
-        ],
-        "technical_note": tech
-    }
-
-def infer_culture_era(features, color_features, elements):
-    """
-    Demo heuristic classifier.
-    Later replace with trained model:
-        prediction = model.predict(image, metadata)
-    """
-    edge = features["edge_density"]
-    sym = max(features["vertical_symmetry_score"], features["horizontal_symmetry_score"])
-    rough = features["texture_laplacian_variance"]
-    mean_rgb = np.array(color_features["mean_rgb"])
-
-    candidates = []
-
-    # These categories are intentionally broad and cautious.
-    # They are not professional authentication results.
-    if edge > 0.09 and sym > 0.68:
-        candidates.append({
-            "label": "商周青铜器几何/兽面纹传统 | Shang-Zhou bronze geometric/taotie-related tradition",
-            "confidence": 0.64,
-            "reason": "边缘密度高、对称性较强，符合部分青铜器纹样常见的密集线条与轴对称特征。"
-        })
-    if rough > 500 and edge > 0.06:
-        candidates.append({
-            "label": "汉唐陶俑/瓦当/浮雕类装饰传统 | Han-Tang ceramic, tile-end, or relief decorative tradition",
-            "confidence": 0.57,
-            "reason": "纹理起伏较高，可能对应浮雕、模印或风化表面。"
-        })
-    if sym > 0.75 and edge < 0.08:
-        candidates.append({
-            "label": "新石器彩陶几何纹传统 | Neolithic painted pottery geometric tradition",
-            "confidence": 0.56,
-            "reason": "整体对称感较强、线条密度中等，可能接近几何化彩陶装饰。"
-        })
-    if mean_rgb[0] > mean_rgb[2] + 15 and edge < 0.08:
-        candidates.append({
-            "label": "陶器/彩陶暖色系装饰 | pottery or painted pottery warm-color tradition",
-            "confidence": 0.52,
-            "reason": "图像整体偏暖色，可能与陶质或红褐色颜料相关。"
-        })
-    if not candidates:
-        candidates.append({
-            "label": "待定：需要更多角度、材质和出土信息 | Undetermined: more metadata required",
-            "confidence": 0.45,
-            "reason": "仅凭单张图片无法稳定判断时代地域，需要结合材质、器型、尺寸、来源和考古语境。"
-        })
-
-    candidates = sorted(candidates, key=lambda x: x["confidence"], reverse=True)
-    return candidates[:3]
-
-def make_report(img, color_features, shape_features, elements, reconstruction, attribution):
-    return {
-        "platform": "Artifact Pattern Intelligence & Reconstruction Platform",
-        "image_size": img.size,
-        "color_features": color_features,
-        "shape_texture_features": shape_features,
-        "recognized_pattern_elements": [
-            {"element": e, "confidence": c} for e, c in elements
-        ],
-        "fragment_completion_3d_reconstruction": reconstruction,
-        "era_region_culture_candidates": attribution,
-        "important_warning": "Demo result only. Professional attribution requires archaeological context, material analysis, typology, stratigraphy, inscriptions, and verified reference datasets."
-    }
-
-# -----------------------------
 # Sidebar
-# -----------------------------
-st.sidebar.title("⚙️ Settings / 设置")
+st.sidebar.title("Settings")
 lang = st.sidebar.radio("Language / 语言", ["中文", "English"], index=0)
 T = TEXT[lang]
+top_k = st.sidebar.slider(T["top_k"], 3, 10, 5)
 
-st.sidebar.markdown("---")
-confidence_mode = st.sidebar.selectbox(
-    T["confidence_mode"],
-    ["Demo heuristic model", "Future real model API"],
-)
-st.sidebar.caption(T["confidence_mode_help"])
+db = load_database()
 
-st.sidebar.markdown("---")
-st.sidebar.info(
-    "Model interface reserved:\n"
-    "`models/predict.py`\n\n"
-    "You can later connect CLIP, BLIP, SAM, CNN, ViT, NeRF, COLMAP, or a custom archaeological database."
-)
-
-# -----------------------------
-# Main page
-# -----------------------------
 st.title(T["title"])
 st.caption(T["subtitle"])
-
 st.warning(T["warning"])
 
-uploaded = st.file_uploader(
-    T["upload"],
-    type=["jpg", "jpeg", "png"],
-    help=T["upload_help"]
-)
+with st.expander(T["db_status"], expanded=True):
+    if db is None:
+        st.error(T["no_db"])
+    else:
+        st.success(f"Loaded database: {len(db)} rows from {DB_PATH}")
+        st.dataframe(db.head(8), use_container_width=True)
 
-if uploaded is None:
-    st.info(T["no_file"])
-    st.markdown("### " + T["github"])
-    st.code(
-        "git init\n"
-        "git add .\n"
-        "git commit -m \"init artifact intelligence platform\"\n"
-        "git branch -M main\n"
-        "git remote add origin https://github.com/YOUR_USERNAME/artifact-pattern-platform.git\n"
-        "git push -u origin main\n"
-    )
-    st.stop()
+uploaded = st.file_uploader(T["upload"], type=["jpg", "jpeg", "png"])
 
-img = Image.open(uploaded).convert("RGB")
-enhanced, edges, gray = enhance_image(img)
-
-col1, col2 = st.columns(2)
-with col1:
-    st.subheader(T["input_preview"])
-    st.image(img, use_container_width=True)
-with col2:
-    st.subheader(T["processed_preview"])
-    st.image(enhanced, use_container_width=True)
-
-if st.button(T["analysis"], type="primary"):
-    color_features = extract_color_features(img)
-    shape_features = extract_shape_texture_features(img, edges, gray)
-    elements = infer_pattern_elements(shape_features)
-    reconstruction = infer_reconstruction_plan(shape_features)
-    attribution = infer_culture_era(shape_features, color_features, elements)
-    report = make_report(img, color_features, shape_features, elements, reconstruction, attribution)
-
-    st.markdown("---")
-
-    # Module 1
-    st.header(T["module1"])
-    c1, c2 = st.columns([1, 1])
+with st.expander(T["metadata"], expanded=True):
+    c1, c2, c3, c4 = st.columns(4)
     with c1:
-        st.markdown("**Fragment Matching / 碎片拼合判断**")
-        st.write(reconstruction["fragment_matching"])
-        st.markdown("**Completion Hypothesis / 补全假设**")
-        st.write(reconstruction["completion_hypothesis"])
-        st.markdown("**Technical Note / 技术说明**")
-        st.write(reconstruction["technical_note"])
+        material = st.text_input(T["material"], placeholder="ceramic / bronze / textile / jade...")
     with c2:
-        st.markdown("**Recommended Pipeline / 推荐流程**")
-        for step in reconstruction["recommended_pipeline"]:
-            st.write(step)
+        object_type = st.text_input(T["object_type"], placeholder="vessel / tile / textile / ornament...")
+    with c3:
+        region_hint = st.text_input(T["region_hint"], placeholder="Andes / Mediterranean / China...")
+    with c4:
+        era_hint = st.text_input(T["era_hint"], placeholder="Neolithic / Roman / Ming...")
+    caption = st.text_area(T["caption"], placeholder="Any visible motifs, museum label, excavation context, etc.")
 
-    # Module 2
-    st.header(T["module2"])
-    m1, m2, m3 = st.columns(3)
-    with m1:
-        st.metric("Edge Density / 边缘密度", shape_features["edge_density"])
-        st.metric("Contour Count / 轮廓数量", shape_features["contour_count"])
-    with m2:
-        st.metric("Vertical Symmetry / 垂直对称", shape_features["vertical_symmetry_score"])
-        st.metric("Horizontal Symmetry / 水平对称", shape_features["horizontal_symmetry_score"])
-    with m3:
-        st.metric("Texture Roughness / 纹理起伏", shape_features["texture_laplacian_variance"])
-        st.metric("Contour Area Ratio / 轮廓面积比", shape_features["contour_area_ratio"])
+if uploaded and db is not None:
+    img = Image.open(uploaded).convert("RGB")
+    enhanced, gray, edges = preprocess(img)
 
-    st.markdown("**Recognized Pattern Elements / 识别出的纹样元素**")
-    element_df = pd.DataFrame(elements, columns=["Element / 元素", "Confidence / 置信度"])
-    st.dataframe(element_df, use_container_width=True)
+    col1, col2 = st.columns(2)
+    with col1:
+        st.subheader(T["original"])
+        st.image(img, use_container_width=True)
+    with col2:
+        st.subheader(T["enhanced"])
+        st.image(enhanced, use_container_width=True)
 
-    st.markdown("**Dominant Colors / 主色提取**")
-    color_cols = st.columns(len(color_features["dominant_colors_rgb"]))
-    for i, (rgb, prop) in enumerate(zip(color_features["dominant_colors_rgb"], color_features["dominant_color_proportions"])):
-        with color_cols[i]:
-            swatch = Image.new("RGB", (100, 60), tuple(rgb))
-            st.image(swatch, caption=f"RGB {rgb}\n{prop}", use_container_width=True)
+    if st.button(T["run"], type="primary"):
+        features = extract_features(img, gray, edges)
+        visual_tags = infer_visual_tags(features)
+        elements = recognize_elements(features)
+        metadata = {
+            "material": material,
+            "object_type": object_type,
+            "region_hint": region_hint,
+            "era_hint": era_hint,
+            "caption": caption,
+        }
+        candidates = global_match(db, features, visual_tags, metadata, top_k=top_k)
+        advice = reconstruction_advice(features)
 
-    # Module 3
-    st.header(T["module3"])
-    for cand in attribution:
-        st.markdown(f"### {cand['label']}")
-        st.progress(float(cand["confidence"]))
-        st.write("**Reason / 理由：** " + cand["reason"])
+        st.header(T["visual_features"])
+        a, b, c, d = st.columns(4)
+        a.metric("Edge density", features["edge_density"])
+        b.metric("Symmetry max", max(features["vertical_symmetry"], features["horizontal_symmetry"]))
+        c.metric("Texture roughness", features["texture_roughness"])
+        d.metric("Contour count", features["contour_count"])
+        st.write("**Visual tags:**", ", ".join(visual_tags))
 
-    # Summary
-    st.header(T["summary"])
-    st.json(report)
+        st.header(T["pattern_elements"])
+        st.dataframe(pd.DataFrame(elements), use_container_width=True)
 
-    st.download_button(
-        T["download"],
-        data=json.dumps(report, ensure_ascii=False, indent=2),
-        file_name="artifact_pattern_analysis_report.json",
-        mime="application/json"
-    )
+        st.header(T["global_candidates"])
+        st.dataframe(candidates, use_container_width=True)
 
-    st.info(
-        "下一步升级方向：接入真实数据集；建立“纹样—器型—材质—时代—地域—文化来源”的知识库；"
-        "用 CLIP/ViT 做图像嵌入检索，用 Bayesian model 表达不确定性。"
-    )
+        st.header(T["reconstruction"])
+        for item in advice:
+            st.write("- " + item)
+
+        report = {
+            "image_size": img.size,
+            "visual_features": features,
+            "visual_tags": visual_tags,
+            "recognized_elements": elements,
+            "metadata": metadata,
+            "global_candidates": candidates.to_dict(orient="records"),
+            "reconstruction_advice": advice,
+            "important_note": "Prototype output only. Use with archaeological context and expert review."
+        }
+
+        st.header(T["report"])
+        st.json(report)
+        st.download_button(
+            T["download"],
+            data=json.dumps(report, ensure_ascii=False, indent=2),
+            file_name="artifact_intelligence_report.json",
+            mime="application/json"
+        )
+elif uploaded and db is None:
+    st.stop()
