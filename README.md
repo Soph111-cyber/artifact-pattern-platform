@@ -1,26 +1,56 @@
-# 🏺 Artifact Intelligence Lab
+# 🏺 Artifact Intelligence Lab  
+## Pattern Completion + Global Cultural Attribution
 
-A Streamlit research prototype for global artifact pattern recognition, fragment completion, and cultural attribution.
+This is a Streamlit research prototype for:
 
-## What it does
+1. Completing damaged artifact/pattern images
+2. Uploading a custom Excel database of global cultural motif features
+3. Generating evidence-based cultural attribution candidates
 
-Users can upload an artifact pattern or fragment image. The platform extracts visual features and compares them with a global Excel-based motif database.
+## Main functions
 
-Main modules:
+### A. Damaged pattern completion
+The app detects missing white/blank areas and uses:
 
-1. **Pattern feature recognition**
-   - edge density
-   - symmetry score
-   - texture roughness
-   - contour complexity
-   - visual keyword tags
+- 180° rotational symmetry
+- horizontal mirror symmetry
+- vertical mirror symmetry
+- OpenCV inpainting boundary blending
 
-2. **Global cultural attribution**
-   - uses `data/global_artifact_pattern_feature_database.xlsx`
-   - returns top candidate cultures/styles, eras, regions, motif features, possible confusions, and source URLs
+This is useful for mandala-like, textile-like, tiled, or repeated ornament patterns.
 
-3. **Fragment restoration / 3D reconstruction plan**
-   - suggests segmentation, feature matching, ICP alignment, SfM/MVS, COLMAP/Meshroom workflow
+### B. Excel-based cultural attribution
+You can upload your own `.xlsx` database. If no Excel is uploaded, the app uses:
+
+```text
+global_pattern_feature_template.xlsx
+```
+
+The recommended sheet name is:
+
+```text
+Pattern_Feature_DB
+```
+
+Important columns:
+
+```text
+Culture_or_style
+Macro_region
+Region_or_origin
+Era_period
+Key_motifs_EN
+关键纹样_CN
+Geometry_tags
+Color_palette_hints
+Material_surface_hints
+Model_positive_keywords
+Model_visual_features
+Potential_confusions
+Attribution_confidence_seed
+Source_URL
+Notes
+```
 
 ## Run locally
 
@@ -31,12 +61,15 @@ streamlit run app.py
 
 ## Deploy on Streamlit Cloud
 
-1. Push this folder to GitHub.
-2. Go to Streamlit Cloud.
-3. Choose the GitHub repository.
-4. Main file path: `app.py`.
-5. Deploy.
+1. Upload these files to the root of your GitHub repository:
+   - `app.py`
+   - `requirements.txt`
+   - `README.md`
+   - `global_pattern_feature_template.xlsx`
+2. In Streamlit Cloud, set:
+   - Main file path: `app.py`
+3. Deploy.
 
 ## Important note
 
-This is a research-demo platform, not a professional archaeological authentication system. Real attribution requires material, object type, measurements, provenance, excavation context, inscriptions, and expert-reviewed databases.
+This platform is not a professional authentication system. It generates hypotheses and evidence trails. Real cultural attribution requires material, object type, measurements, provenance, excavation context, inscriptions, museum records, and expert review.
